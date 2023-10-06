@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from django.test import TestCase
 
-from components_app.management.commands.update_table_from_excel import FILE_STOCK, SHEET_NAME
-from components_app.services import StockTabFromExcelUpdater, DataReader
+from components_app.management.commands.update_table_from_excel import SHEET_NAME
+from components_app.services import StockTabFromExcelUpdater, DEFAULT_OFFSET_FOR_INDEXES
 from components_app.models import StockFromExcel, DEFAULT_NAN_VALUE
 import os
 
@@ -26,12 +26,9 @@ PATH_TO_TEST_DATA = os.path.join(os.path.dirname(__file__), TEST_FOLDER)
 # os.path.abspath  --> gives you an absolute path
 # (normalized path with similar slashes in path-str and NO slash at the end of the path-str)
 
-# COLUMNS = 'C, D, E, F, G, H, I, J, K, L, M, N, O, P'
-# COLUMNS_TO_FILE = 'A, B, C, D'
-COLUMNS = 'C, D, E, F, G, H, I, J, K, L, M, N, O'
-# SHEET_NAME = 'Склад'
-# FILE_STOCK = 'Склад 14.01.16.xlsx'
-MODEL = StockFromExcel
+TEST_COLUMNS = 'C, D, E, F, G, H, I, J, K, L, M, N, O'
+
+TEST_MODEL = StockFromExcel  # now tests for model StockFromExcel
 
 # COMMANDS
 # python manage.py test components_app
@@ -95,22 +92,18 @@ class ServicesTestCase(TestCase):
 
     path_to_file = PATH_TO_TEST_DATA
     sheet_name = SHEET_NAME
-    columns_letters_str = COLUMNS
+    columns_letters_str = TEST_COLUMNS
     longer_columns_letters_str = 'C, D, E, F, G, H, I, J, K, L, M, N, O, QQ'
     err_columns_letters_str = 'err'
 
-    model = MODEL
+    model = TEST_MODEL
 
     nan_value = DEFAULT_NAN_VALUE
+    offset = DEFAULT_OFFSET_FOR_INDEXES
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-
-        # print()
-        # print('-----test-DF to write into the excel file')
-        # print(cls.dataframe_for_excel_file.head())
-        # print(f'cls.test_path = {cls.full_path}')
 
         cls.dataframe_for_excel_file_1.to_excel(
             cls.full_path_1,
@@ -129,8 +122,6 @@ class ServicesTestCase(TestCase):
             engine='openpyxl',
         )
 
-        # print('-----test_df 1, 2 created')
-
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
@@ -140,13 +131,12 @@ class ServicesTestCase(TestCase):
             try:
                 os.remove(cls.full_path_1)
             except Exception as e:
-                print(f'ОШИБКА tearDownClass1: {type(e)}: {e}')
+                print(f'ERROR tearDownClass1: {type(e)}: {e}')
         if os.path.exists(cls.full_path_2):
             try:
                 os.remove(cls.full_path_2)
             except Exception as e:
-                print(f'ОШИБКА tearDownClass2: {type(e)}: {e}')
-        # print('-----test_excel_files removed')
+                print(f'ERROR tearDownClass2: {type(e)}: {e}')
 
     @classmethod
     def setUpTestData(cls):
@@ -162,7 +152,6 @@ class ServicesTestCase(TestCase):
     def tearDown(self):
         # Teardown specific to each test method
         self.model.objects.all().delete()
-        # print('-----Teardown specific to each test method')
         pass
 
     def test_make_cell_names(self):
@@ -180,8 +169,6 @@ class ServicesTestCase(TestCase):
 
         self.assertEqual(True, flag)
 
-        # print('-----test_validate_columns_true')
-
     def test_validate_columns_false(self):
         flag = StockTabFromExcelUpdater(
             self.model,
@@ -191,8 +178,6 @@ class ServicesTestCase(TestCase):
             self.longer_columns_letters_str).validate_columns()
 
         self.assertEqual(False, flag)
-
-        # print('-----test_validate_columns_false')
 
     def test_validate_columns_err(self):
         flag = StockTabFromExcelUpdater(
@@ -204,8 +189,6 @@ class ServicesTestCase(TestCase):
 
         self.assertEqual(False, flag)
 
-        # print('-----test_validate_columns_err')
-
     def test_read_specified_columns_from_db_table_initial_state(self):
 
         init_test_obj = StockTabFromExcelUpdater(
@@ -215,11 +198,9 @@ class ServicesTestCase(TestCase):
             self.sheet_name,
             self.columns_letters_str)
 
-        db_df = init_test_obj.read_specified_columns_from_db_table()
+        db_df = init_test_obj.read_specified_columns_from_db_table(init_test_obj.col_list)
 
         self.assertEqual(len(db_df), 0)
-
-        # print('-----test_read_specified_columns_from_db_table 0')
 
     def test_read_specified_columns_from_db_table_1row(self):
         # create 1 row in table with default values
@@ -232,11 +213,9 @@ class ServicesTestCase(TestCase):
             self.sheet_name,
             self.columns_letters_str)
 
-        db_df = init_test_obj.read_specified_columns_from_db_table()
+        db_df = init_test_obj.read_specified_columns_from_db_table(init_test_obj.col_list)
 
         self.assertEqual(len(db_df), 1)
-
-        # print('-----test_read_specified_columns_from_db_table_1row')
 
     def test_read_specified_columns_from_excel_sheet_success(self):
         init_test_obj = StockTabFromExcelUpdater(
@@ -256,8 +235,6 @@ class ServicesTestCase(TestCase):
                          )
         self.assertEqual(all_str, True)
 
-        # print('-----test_read_specified_columns_from_excel_sheet_success')
-
     def test_validate_df_to_get_unequal_rows_create(self):
         init_test_obj = StockTabFromExcelUpdater(
             self.model,
@@ -265,13 +242,12 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows = init_test_obj.validate_df_to_get_unequal_rows()
+        unequal_rows, len_df = init_test_obj.validate_df_to_get_unequal_rows()
         # equals -- This approach directly compares the content of the two DataFrames,
         # considering index, column names, and cell values.
         # It's a more reliable way to determine whether the DataFrames are the same.
         res = unequal_rows.equals(init_test_obj.read_specified_columns_from_excel_sheet(np.nan))
         self.assertEqual(res, True)
-        # print('-----test_validate_df_to_get_unequal_rows_create')
 
     def test_validate_df_to_get_unequal_rows_update(self):
 
@@ -281,7 +257,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         # iterrows and itertuples give the same results.
         # so for testing we use different methods to catch the changes and mistakes
         # upon modifying functions
@@ -294,9 +270,8 @@ class ServicesTestCase(TestCase):
             self.sheet_name,
             self.columns_letters_str)
         # 1st run - returns rows of unequal_idxs, if all idxs equals --> returns unequal_rows
-        unequal_idxs_2 = init_test_obj_2.validate_df_to_get_unequal_rows()
+        unequal_idxs_2, len_df_2 = init_test_obj_2.validate_df_to_get_unequal_rows()
         self.assertEqual(len(unequal_idxs_2), 1)
-        # print('-----test_validate_df_to_get_unequal_rows_update')
 
     def test_create_by_iterrows(self):
         init_test_obj_1 = StockTabFromExcelUpdater(
@@ -305,7 +280,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         res = init_test_obj_1.create_by_iterrows(unequal_rows_1)
         self.assertEqual(res, (4, 0))
 
@@ -316,7 +291,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         res = init_test_obj_1.create_by_itertuples(unequal_rows_1)
         self.assertEqual(res, (4, 0))
 
@@ -327,7 +302,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         init_test_obj_1.create_by_iterrows(unequal_rows_1)
 
         init_test_obj_2 = StockTabFromExcelUpdater(
@@ -347,7 +322,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         init_test_obj_1.create_by_iterrows(unequal_rows_1)
 
         init_test_obj_2 = StockTabFromExcelUpdater(
@@ -367,7 +342,7 @@ class ServicesTestCase(TestCase):
             self.file_name_1,
             self.sheet_name,
             self.columns_letters_str)
-        unequal_rows_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
+        unequal_rows_1, len_df_1 = init_test_obj_1.validate_df_to_get_unequal_rows()
         init_test_obj_1.create_by_iterrows(unequal_rows_1)
 
         init_test_obj_2 = StockTabFromExcelUpdater(
@@ -379,4 +354,66 @@ class ServicesTestCase(TestCase):
 
         res = init_test_obj_2.update_and_create_by_itertuples()
         self.assertEqual(res, (0, 0, 0, 0))
+
+    def test_find_comment_colum_names(self):
+        init_test_obj = StockTabFromExcelUpdater(
+            self.model,
+            self.path_to_file,
+            self.file_name_1,
+            self.sheet_name,
+            self.columns_letters_str)
+
+        res = init_test_obj.fields_of_comments_dict
+        self.assertEqual(res, {'comments_to_field_quantity_in_stock': 'Склад основной'})
+
+    def test_find_cell_names_to_comment_colum_names(self):
+        init_test_obj = StockTabFromExcelUpdater(
+            self.model,
+            self.path_to_file,
+            self.file_name_1,
+            self.sheet_name,
+            self.columns_letters_str)
+
+        res = init_test_obj.find_cell_names_to_comment_colum_names()
+        self.assertEqual(res, {'I1': 'quantity_in_stock'})
+
+    def test_read_db_comments_to_df(self):
+        init_test_obj = StockTabFromExcelUpdater(
+            self.model,
+            self.path_to_file,
+            self.file_name_1,
+            self.sheet_name,
+            self.columns_letters_str)
+
+        res, col_list = init_test_obj.read_db_comments_to_df()
+        self.assertEqual(True, res.empty)
+        self.assertEqual(['comments to field quantity in stock'], res.columns)
+
+    def test_read_file_comments_to_df(self):
+        init_test_obj = StockTabFromExcelUpdater(
+            self.model,
+            self.path_to_file,
+            self.file_name_1,
+            self.sheet_name,
+            self.columns_letters_str)
+        res_df = init_test_obj.read_file_comments_to_df()
+
+        data = {'comments to field quantity in stock': [self.nan_value]*4}
+        df = pd.DataFrame(data)
+        df.index = df.index + self.offset
+        self.assertEqual(True, df.equals(res_df))
+
+    def test_validate_comment_df_to_get_unequal_rows(self):
+        init_test_obj = StockTabFromExcelUpdater(
+            self.model,
+            self.path_to_file,
+            self.file_name_1,
+            self.sheet_name,
+            self.columns_letters_str)
+        init_test_obj.update_and_create_by_itertuples()
+        res_df, col_list = init_test_obj.validate_comment_df_to_get_unequal_rows()
+        self.assertEqual(True, res_df.empty)
+        self.assertEqual(['comments_to_field_quantity_in_stock'], res_df.columns)
+
+
 

@@ -52,6 +52,7 @@ class StockComponents(models.Model):
     created = models.DateField(auto_now_add=True)
     updated = models.DateField(auto_now=True)
 
+    # fix related_name='users_events' to smth else
     user: CustomUser = models.ForeignKey(CustomUser, on_delete=models.PROTECT, related_name='users_events')
 
     # def __str__(self):
@@ -241,6 +242,16 @@ V 'Со столбцов A-I снята защита\nПароль789123',,
         blank=True,
         help_text='Поле - Вес, г - в файле склада.',
         verbose_name=u"Вес, г",
+        default=DEFAULT_NAN_VALUE,
+    )
+
+    # COMMENT FIELDS
+    comments_to_field_quantity_in_stock = models.TextField(
+
+        null=True,
+        blank=True,
+        help_text='КОММЕНТАРИЙ к полю - Склад основной - в файле склада.',
+        # verbose_name=u"",  # verbose_name="comments to field quantity in stock"
         default=DEFAULT_NAN_VALUE,
     )
 

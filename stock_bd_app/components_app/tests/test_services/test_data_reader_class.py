@@ -5,6 +5,7 @@ from components_app.management.commands.update_table_from_excel import FILE_STOC
 from components_app.services import DataReader
 import os
 import openpyxl
+from openpyxl.comments import Comment
 
 # TEST_FILE_1 = 'Склад 14.01.16.xlsx'
 TEST_FILE_1 = FILE_STOCK
@@ -18,11 +19,7 @@ PATH_TO_TEST_DATA = os.path.join(os.path.dirname(__file__), TEST_FOLDER)
 # os.path.abspath  --> gives you an absolute path
 # (normalized path with similar slashes in path-str and NO slash at the end of the path-str)
 
-# COLUMNS = 'C, D, E, F, G, H, I, J, K, L, M, N, O, P'
-# COLUMNS_TO_FILE = 'A, B, C, D'
-COLUMNS = 'C, D'
-# SHEET_NAME = 'Склад'
-# FILE_STOCK = 'Склад 14.01.16.xlsx'
+TEST_COLUMNS = 'C, D'
 
 # COMMANDS
 # python manage.py test components_app
@@ -42,16 +39,11 @@ class ServicesTestCase(TestCase):
     file_name = TEST_FILE_1
     path_to_file = PATH_TO_TEST_DATA
     sheet_name = SHEET_NAME
-    columns_letters_str = COLUMNS
+    columns_letters_str = TEST_COLUMNS
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-
-        # print()
-        # print('-----test-DF to write into the excel file')
-        # print(cls.dataframe_for_excel_file.head())
-        # print(f'cls.test_path = {cls.full_path}')
 
         cls.dataframe_for_excel_file.to_excel(
             cls.full_path,
@@ -62,7 +54,17 @@ class ServicesTestCase(TestCase):
             engine='openpyxl',
         )
 
-        # print('-----test_df created')
+        wb = openpyxl.load_workbook(cls.full_path)
+        sheet = wb[cls.sheet_name]
+
+        comment1 = Comment("This is a comment for cell C2", "Author 1")
+        sheet['C2'].comment = comment1
+
+        comment2 = Comment("Another comment for cell C3", "Author 2")
+        sheet['C3'].comment = comment2
+        wb.save(cls.full_path)
+
+        wb.close()
 
     @classmethod
     def tearDownClass(cls):
@@ -71,7 +73,6 @@ class ServicesTestCase(TestCase):
         # Clean up by deleting the test Excel file
         if os.path.exists(cls.full_path):
             os.remove(cls.full_path)
-        # print('-----test_excel_file removed')
 
     @classmethod
     def setUpTestData(cls):
@@ -90,9 +91,6 @@ class ServicesTestCase(TestCase):
         pass
 
     def test_read_excel_to_dataframe_success(self):
-        # print()
-        # print('-----test_read_excel_to_dataframe_success')
-        # print('---DF read from excel file')
         df = pd.read_excel(
                     self.full_path,
                     sheet_name=self.sheet_name,
@@ -100,24 +98,15 @@ class ServicesTestCase(TestCase):
                     engine='openpyxl',
                     dtype='object',
                 )
-        # print(df.head())
-        # print(df.shape)
-        # print()
-        #
-        # print('--- test DataReader, read_data_from_stock_file')
         source_df, msg = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file(
             self.sheet_name, self.columns_letters_str)
-        # print(source_df.head())
         are_equal = df.equals(source_df)
 
         self.assertEqual(are_equal, True)
         self.assertEqual(msg, '')
 
     def test_read_excel_to_dataframe_fail(self):
-        # print()
-        # print('-----test_read_excel_to_dataframe_fail')
-        # print('---DF read from excel file')
         df = pd.read_excel(
                     self.full_path,
                     sheet_name=self.sheet_name,
@@ -125,72 +114,75 @@ class ServicesTestCase(TestCase):
                     engine='openpyxl',
                     dtype='object',
                 )
-        # print(df.head())
-        # print(df.shape)
-        # print()
 
-        # print('--- test DataReader, read_data_from_stock_file')
-        # print('--fail_path')
         source_df, msg = DataReader(
             'fail_path/', self.file_name).read_data_from_stock_file(
             self.sheet_name, self.columns_letters_str)
         are_equal = df.equals(source_df)
 
         self.assertEqual(are_equal, False)
-        self.assertEqual(msg.endswith('-- не найден.'), True)
+        self.assertEqual(msg.endswith('-- not found.'), True)
 
-        # print('--fail_file')
         source_df, msg = DataReader(
             self.path_to_file, 'fail_file.xlsx').read_data_from_stock_file(
             self.sheet_name, self.columns_letters_str)
         are_equal = df.equals(source_df)
 
         self.assertEqual(are_equal, False)
-        self.assertEqual(msg.endswith('-- не найден.'), True)
+        self.assertEqual(msg.endswith('-- not found.'), True)
 
-        # print('--fail_columns')
         source_df, msg = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file(
             self.sheet_name, 'fail_columns')
         are_equal = df.equals(source_df)
 
         self.assertEqual(are_equal, False)
-        self.assertEqual(msg.startswith('ОШИБКА'), True)
+        self.assertEqual(msg.startswith('ERROR'), True)
 
-        # print('--fail_sheet')
         source_df, msg = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file(
             'fail_sheet', self.columns_letters_str)
         are_equal = df.equals(source_df)
 
         self.assertEqual(are_equal, False)
-        self.assertEqual(msg.startswith('ОШИБКА'), True)
+        self.assertEqual(msg.startswith('ERROR'), True)
 
     def test_read_data_from_stock_file_by_openpyxl_success(self):
-        # print('----- DataReader, test WB')
-        # test_excel_column_names = data_dict_for_test_excel_file_1.keys()
         excel_file_column_names = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file_by_openpyxl(
             self.sheet_name, ['A1', 'B1'])
-        # self.assertEqual(list(self.test_excel_column_names), excel_file_column_names)
         self.assertEqual({'A1': 'Переход в Резервы', 'B1': 'Переход в СП плат'}, excel_file_column_names)
 
     def test_read_data_from_stock_file_by_openpyxl_none_cell(self):
-        # print('----- DataReader, test none_cell')
-        # test_excel_column_names = data_dict_for_test_excel_file_1.keys()
         excel_file_column_names = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file_by_openpyxl(
             self.sheet_name, ['A1', 'F1'])
-        # self.assertEqual(list(self.test_excel_column_names), excel_file_column_names)
         self.assertEqual({'A1': 'Переход в Резервы', 'F1': None}, excel_file_column_names)
 
     def test_read_data_from_stock_file_by_openpyxl_fail(self):
-        # print('----- DataReader, test fail - incorrect list of cells')
-        # test_excel_column_names = data_dict_for_test_excel_file_1.keys()
         excel_file_column_names = DataReader(
             self.path_to_file, self.file_name).read_data_from_stock_file_by_openpyxl(
             self.sheet_name, 'A1')
-        # self.assertEqual(list(self.test_excel_column_names), excel_file_column_names)
         self.assertEqual(dict(), excel_file_column_names)
 
+    def test_read_comments_from_stock_file_by_openpyxl_1(self):
+        # test col where no comments
+        comment_dict = DataReader(
+            self.path_to_file, self.file_name).read_comments_from_stock_file_by_openpyxl(
+            self.sheet_name, {'A1': ['A2', 'A3', 'A4', 'A5', 'A6']})
+        self.assertEqual({'Переход в Резервы': [None for _ in range(5)]}, comment_dict)
 
+    def test_read_comments_from_stock_file_by_openpyxl_2(self):
+        # test col with 2 comments
+        comment_dict = DataReader(
+            self.path_to_file, self.file_name).read_comments_from_stock_file_by_openpyxl(
+            self.sheet_name, {'C1': ['C2', 'C3', 'C4', 'C5', 'C6']})
+        self.assertEqual({
+            'Артикул': [
+                "This is a comment for cell C2",
+                "Another comment for cell C3",
+                None,
+                None,
+                None,
+            ]
+        }, comment_dict)

@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# offset for indexes is manually set to correspond art_numbers
+DEFAULT_OFFSET_FOR_INDEXES = 2
+
 
 # FUNCTIONS ------------------------------------------
 
@@ -31,8 +34,6 @@ class DataReader:
         self.msg = ''
 
     def read_data_from_stock_file(self, sheet_name, cols):
-        # print('DataReader. File reading using pd.read_excel()')
-        # print(self.path)
         if self.path_to_file is not None and os.path.exists(self.path):
             try:
                 self.data = pd.read_excel(
@@ -45,19 +46,14 @@ class DataReader:
                     # and NaN values without any automatic type conversions
                 )
             except Exception as e:
-                self.msg = f'ОШИБКА: {type(e)}: {e}'
+                self.msg = f'ERROR: {type(e)}: {e}'
         else:
-            self.msg = f'{self.path} -- не найден.'
-
-        # print(self.data.shape)
-        # print(self.data.dtypes)
-        # print(self.msg)
-
+            self.msg = f'{self.path} -- not found.'
+            print(self.msg)
         return self.data, self.msg
 
-    def read_data_from_stock_file_by_openpyxl(self, sheet_name, cell_names):
-        # print('DataReader. File reading using openpyxl.load_workbook() in read_only mode')
-        # print(f'cell_names: {cell_names}')
+    def read_data_from_stock_file_by_openpyxl(self, sheet_name, cell_names_list):
+        excel_file_column_names = dict()
         if self.path_to_file is not None and os.path.exists(self.path):
             try:
                 # read-only mode optimized for faster performance
@@ -85,12 +81,34 @@ class DataReader:
                 wb = openpyxl.load_workbook(in_mem_file, read_only=True)
                 sheet = wb[sheet_name]
                 excel_file_column_names = {
-                    cell_name: sheet[cell_name].value for cell_name in cell_names
+                    cell_name: sheet[cell_name].value for cell_name in cell_names_list
                 }
             except Exception as e:
-                excel_file_column_names = dict()
-                print(f'ОШИБКА: {type(e)}: {e}')
-            return excel_file_column_names
+                print(f'ERROR: {type(e)}: {e}')
+        else:
+            self.msg = f'{self.path} -- not found.'
+            print(self.msg)
+        return excel_file_column_names
+
+    def read_comments_from_stock_file_by_openpyxl(self, sheet_name, cell_names_dict):
+        comment_dict = dict()
+
+        if self.path_to_file is not None and os.path.exists(self.path):
+            try:
+                wb = openpyxl.load_workbook(self.path)
+                sheet = wb[sheet_name]
+                for cell_col_name, cell_names_list in cell_names_dict.items():
+                    cell_names_list = [
+    sheet[cell_name].comment.text if sheet[cell_name].comment else None for cell_name in cell_names_list
+                    ]
+                    comment_dict[sheet[cell_col_name].value] = cell_names_list
+                wb.close()
+            except Exception as e:
+                print(f'ERROR: {type(e)}: {e}')
+        else:
+            self.msg = f'{self.path} -- not found.'
+            print(self.msg)
+        return comment_dict
 
 
 # -------------------- functions
@@ -166,10 +184,15 @@ class StockTabFromExcelUpdater:
         ]
 
         self.nan_value = DEFAULT_NAN_VALUE
-        self.offset = 2  # offset for indexes is manually set to correspond art_numbers
+        self.offset = DEFAULT_OFFSET_FOR_INDEXES
+        self.fields_of_comments_dict = self.find_comment_colum_names()
 
     @staticmethod
     def make_cell_names(columns):
+        """
+        :param columns: str /// 'A, B, C'
+        :return: cell_names: list /// ['A1', 'B1', 'C1']
+        """
         columns_list = columns.split(', ')
         cell_names = [f'{column_letter}1' for column_letter in columns_list]
         return cell_names
@@ -190,43 +213,29 @@ class StockTabFromExcelUpdater:
                     print(f'ERR-CELL is << {cell} >> (column_name of this cell not found in DB): {col}')
         else:
             flag = False
-        print(flag)
+        # print(flag)
         return flag
 
-    def read_specified_columns_from_db_table(self):
+    def read_specified_columns_from_db_table(self, col_list):
         """
         Reads data from DB-table.
         Col_names filtered using verbose names of DB-columns,
         and index-numerating corrected with offset
         to get DF with the same structure as df_from_excel_file,
         and indexes that can be used in comparison of two DFs
-        :return: DF
+        :return: DF with specified_columns_data from DB
         """
 
-        # print(f'self.db_column_names.items() = {self.db_column_names.items()}')
-        # print(f'self.column_names_from_excel_file = {self.column_names_from_excel_file}')
-        # print(f'self.column_names_from_excel_file.values() = {self.column_names_from_excel_file.values()}')
-
-        columns_str = ', '.join(self.col_list)
-        # print(f'columns_str = {columns_str}')
+        columns_str = ', '.join(col_list)
         with connection.cursor() as cursor:
             query = f"SELECT {columns_str} FROM {self.table_name};"
             cursor.execute(query)
             data = cursor.fetchall()
 
-        db_df = pd.DataFrame(data, columns=self.column_names_from_excel_file.values())
+        field_names = [self.db_column_names[field_name] for field_name in col_list]
+        db_df = pd.DataFrame(data, columns=field_names)
         db_df.index = db_df.index + self.offset
 
-        # col_list = [k for k, v in self.db_column_names.items() if v in self.column_names_from_excel_file]
-        # queryset = self.model.objects.values(*col_list)
-        # db_df = pd.DataFrame.from_records(queryset, index='id', columns=self.column_names_from_excel_file)
-
-        # print(db_df.shape)
-        # print(db_df.dtypes)
-        # print('DB HEAD')
-        # print(db_df.head())
-        # print('TAIL')
-        # print(db_df.tail())
         return db_df
 
     def read_specified_columns_from_excel_sheet(self, db_art_max):
@@ -245,34 +254,28 @@ class StockTabFromExcelUpdater:
 
         source_df.index = source_df.index + self.offset
 
-        # print(f'1 db_art_max in func = {db_art_max}')
-        # print(f'2 db_art_max in func = {db_art_max}')
-        # print(f'type(db_art_max) = {type(db_art_max)}')
-
-        # if some last art_numbers were deleted from file - this changes update in DB by default nan_value
+        # if some last art_numbers were deleted from file - this changes updated in DB by default nan_value
         art_number_max = max(source_df['Артикул'].max(), db_art_max)
-        # print(f'art_number_max = {art_number_max}')
         source_df = source_df[:(art_number_max-1)]
 
         # all values in columns (except index) should be str - and nan_value is str type
         source_df = source_df.fillna(self.nan_value)
 
-        # print(f'self.column_names_from_excel_file = {self.column_names_from_excel_file}')
-
         type_dict = {col: str for col in self.column_names_from_excel_file.values()}
         source_df = source_df.astype(type_dict)
 
-        # print(source_df.shape)
-        # print(source_df.dtypes)
-        # print('HEAD - after astype')
-        # print(source_df.head())
-        # print('TAIL')
-        # print(source_df.tail())
         return source_df
 
     def validate_df_to_get_unequal_rows(self):
+        """
+        Compares DF from DB and DF from excel file.
+        First it returns rows with unequal_indexes to create this records in BD.
+        Second it returns unequal_rows to update this records in BD.
+        If column_names incorrect so self.validate_columns()=False -> (None, None) returned
+        :return: DF, len(DF from excel file): int
+        """
         if self.validate_columns():
-            db_df = self.read_specified_columns_from_db_table()
+            db_df = self.read_specified_columns_from_db_table(self.col_list)
             db_art_max = db_df.index.max()
             source_df = self.read_specified_columns_from_excel_sheet(db_art_max)
 
@@ -285,17 +288,25 @@ class StockTabFromExcelUpdater:
 
             # new rows are created first, then unequal rows are updated
             if unequal_indexes:
-                return source_df.loc[unequal_indexes]
+                res = source_df.loc[unequal_indexes]
+                # return source_df.loc[unequal_indexes]
             elif db_df.empty or source_df.empty:
-                return source_df
+                res = source_df
+                # return source_df
             else:
                 # can't compare None (None --> default nan value = ''
                 comparison_result = db_df == source_df
-                unequal_rows = source_df[~comparison_result.all(axis=1)]
+                # unequal_rows = source_df[~comparison_result.all(axis=1)]
+                res = source_df[~comparison_result.all(axis=1)]
 
-                return unequal_rows
+                # return unequal_rows
+            return res, len(source_df)
+        else:
+            return None, None
 
     def create_by_iterrows(self, df):
+        # FOR TEST PURPOSES
+
         created_count = 0
         err_count = 0
 
@@ -319,13 +330,15 @@ class StockTabFromExcelUpdater:
 
         end_time = time.time()
         mem_after = psutil.virtual_memory().used
-        print("DONE !!!")
-        print("Time for iterrows():", end_time - start_time, "seconds")
-        print("Memory used by iterrows():", mem_after - mem_before, "bytes")
-        print(f'created_count = {created_count}, err_count = {err_count}')
+        # print("DONE !!!")
+        # print("Time for iterrows():", end_time - start_time, "seconds")
+        # print("Memory used by iterrows():", mem_after - mem_before, "bytes")
+        # print(f'created_count = {created_count}, err_count = {err_count}')
         return created_count, err_count
 
     def update_by_iterrows(self, df):
+        # FOR TEST PURPOSES
+
         updated_count = 0
         err_count = 0
 
@@ -352,21 +365,23 @@ class StockTabFromExcelUpdater:
 
         end_time = time.time()
         mem_after = psutil.virtual_memory().used
-        print("DONE !!!")
-        print("Time for iterrows():", end_time - start_time, "seconds")
-        print("Memory used by iterrows():", mem_after - mem_before, "bytes")
-        print(f'updated_count = {updated_count}, err_count = {err_count}')
+        # print("DONE !!!")
+        # print("Time for iterrows():", end_time - start_time, "seconds")
+        # print("Memory used by iterrows():", mem_after - mem_before, "bytes")
+        # print(f'updated_count = {updated_count}, err_count = {err_count}')
         return updated_count, err_count
 
     def update_and_create_by_iterrows(self):
-        df = self.validate_df_to_get_unequal_rows()
+        # FOR TEST PURPOSES
+
+        df, len_df = self.validate_df_to_get_unequal_rows()
         if df is not None:
             created_count, err_count_create = self.create_by_iterrows(df)
-            df = self.validate_df_to_get_unequal_rows()
+            df, len_df = self.validate_df_to_get_unequal_rows()
             updated_count, err_count_update = self.update_by_iterrows(df)
             return created_count, err_count_create, updated_count, err_count_update
         else:
-            print('CHECK ERRORS!!! BD not updated!')
+            print('CHECK ERRORS!!! DB not updated!')
             return 0, 0, 0, 0
 
     # -----------------------
@@ -404,13 +419,13 @@ class StockTabFromExcelUpdater:
 
         end_time = time.time()
         mem_after = psutil.virtual_memory().used
-        print("DONE !!!")
-        print("Time for itertuples():", end_time - start_time, "seconds")
-        print("Memory used by itertuples():", mem_after - mem_before, "bytes")
-        print(f'created_count = {created_count}, err_count = {err_count}')
+        # print("DONE !!!")
+        # print("Time for itertuples():", end_time - start_time, "seconds")
+        # print("Memory used by itertuples():", mem_after - mem_before, "bytes")
+        # print(f'created_count = {created_count}, err_count = {err_count}')
         return created_count, err_count
 
-    def update_by_itertuples(self, df):
+    def update_by_itertuples(self, df, col_list):
         updated_count = 0
         err_count = 0
 
@@ -423,7 +438,7 @@ class StockTabFromExcelUpdater:
             for row in tqdm(df.itertuples(), total=len_df):
                 # col names in df are verbose names for table in db
                 columns = {
-                    self.col_list[i]: row[i+1] for i in range(0, len(self.col_list))
+                    col_list[i]: row[i + 1] for i in range(0, len(col_list))
                 }
                 try:
                     obj = self.model.objects.get(id=row[0])
@@ -440,24 +455,77 @@ class StockTabFromExcelUpdater:
 
         end_time = time.time()
         mem_after = psutil.virtual_memory().used
-        print("DONE !!!")
-        print("Time for itertuples():", end_time - start_time, "seconds")
-        print("Memory used by itertuples():", mem_after - mem_before, "bytes")
-        print(f'updated_count = {updated_count}, err_count = {err_count}')
+        # print("DONE !!!")
+        # print("Time for itertuples():", end_time - start_time, "seconds")
+        # print("Memory used by itertuples():", mem_after - mem_before, "bytes")
+        # print(f'updated_count = {updated_count}, err_count = {err_count}')
         return updated_count, err_count
 
     def update_and_create_by_itertuples(self):
-        df = self.validate_df_to_get_unequal_rows()
+        df, len_df = self.validate_df_to_get_unequal_rows()
         if df is not None:
             created_count, err_count_create = self.create_by_itertuples(df)
-            df = self.validate_df_to_get_unequal_rows()
-            updated_count, err_count_update = self.update_by_itertuples(df)
+            df, len_df = self.validate_df_to_get_unequal_rows()
+            updated_count, err_count_update = self.update_by_itertuples(df, self.col_list)
             return created_count, err_count_create, updated_count, err_count_update
         else:
-            print('CHECK ERRORS!!! BD not updated!')
+            print('CHECK ERRORS!!! DB not updated!')
             return 0, 0, 0, 0
 
     # When using iterrows(), NaN values are preserved in the resulting named tuple
     # When using itertuples(), NaN values are converted to str 'nan' (lowercase)
     # in the resulting named tuple. This is a pandas-specific NaN representation.
+
+    def find_comment_colum_names(self):
+        fields_of_comments_dict = {f'comments_to_field_{col_name}': self.db_column_names[col_name] for col_name in self.db_column_names.keys() if f"comments_to_field_{col_name}" in self.db_column_names.keys()}
+        return fields_of_comments_dict
+
+    def find_cell_names_to_comment_colum_names(self):
+        cell_names = {cell_name: self.db_verbose_names[cell_value] for cell_name, cell_value in self.column_names_from_excel_file.items() if cell_value in self.fields_of_comments_dict.values()}
+        return cell_names
+
+    def read_db_comments_to_df(self):
+        cell_names = self.find_cell_names_to_comment_colum_names()
+        col_list = [f'comments_to_field_{col_name}' for k, col_name in cell_names.items()]
+        df = self.read_specified_columns_from_db_table(col_list)
+
+        return df, col_list
+
+    def read_file_comments_to_df(self):
+        empty_df, len_df = self.validate_df_to_get_unequal_rows()
+        cell_names_with_comments = self.find_cell_names_to_comment_colum_names()  # dict
+        comment_cell_names_dict = {
+            cell_name: [
+                cell_name[:-1] + str(x) for x in range(self.offset, len_df + self.offset)
+            ] for cell_name in cell_names_with_comments.keys()
+        }
+        comment_dict = DataReader(
+            self.path_to_file, self.file_name).read_comments_from_stock_file_by_openpyxl(
+            self.sheet_name, comment_cell_names_dict)
+        data = {
+            self.db_verbose_names[file_col_name]: list_of_comments for file_col_name, list_of_comments in comment_dict.items()
+        }
+        data = {k.replace('_', ' '): v for k, v in data.items()}
+        res_data = {('comments to field ' + str(k)): v for k, v in data.items()}
+
+        df = pd.DataFrame(res_data)
+        df.index = df.index + self.offset
+        df = df.fillna(self.nan_value)
+
+        return df
+
+    def validate_comment_df_to_get_unequal_rows(self):
+        db_comments, col_list = self.read_db_comments_to_df()
+        file_comments = self.read_file_comments_to_df()
+        comparison_result = db_comments == file_comments
+        comments_to_update_df = file_comments[~comparison_result.all(axis=1)]
+        fields = {verbose_name: verbose_name.replace(' ', '_') for verbose_name in comments_to_update_df.columns}
+        comments_to_update_df = comments_to_update_df.rename(columns=fields)
+        return comments_to_update_df, col_list
+
+    def update_of_db(self):
+        # rewrite later, now it works if input OK !!!!
+        self.update_and_create_by_itertuples()
+        comments_to_update_df, col_list = self.validate_comment_df_to_get_unequal_rows()
+        updated_count, err_count = self.update_by_itertuples(comments_to_update_df, col_list)
 
